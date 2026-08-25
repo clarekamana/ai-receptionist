@@ -1,0 +1,149 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id               String      @id @default(uuid())
+  email            String      @unique
+  passwordHash     String
+  phone            String      @unique
+  phoneVerified    Boolean     @default(false)
+  otpCode          String?
+  name             String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  businesses       Business[]
+}
+
+model Business {
+  id                   String                 @id @default(uuid())
+  ownerId              String
+  owner                User                   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name                 String
+  type                 String
+  timezone             String                 @default("UTC")
+  allocatedPhone       String?
+  forwardingPhone      String?
+  phoneConfigured      Boolean                @default(false)
+  hoursAndServices     String?                // JSON payload
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  
+  onboardingState      OnboardingState?
+  knowledgeBase        KnowledgeItem[]
+  bottleneckQuestions  BottleneckQuestion[]
+  escalationRules      EscalationRule[]
+  customers            Customer[]
+  appointments         Appointment[]
+  callLogs             CallLog[]
+  notificationSetting  NotificationSetting?
+  teamMembers          TeamMember[]
+}
+
+model OnboardingState {
+  id           String   @id @default(uuid())
+  businessId   String   @unique
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  currentStep  Int      @default(1)
+  completed    Boolean  @default(false)
+  stepData     String?  // JSON stringified state
+}
+
+model KnowledgeItem {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  question    String
+  answer      String
+  source      String   @default("SETUP") // "SETUP" or "CLIENT_CALL"
+  tags        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model BottleneckQuestion {
+  id          String    @id @default(uuid())
+  businessId  String
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  callId      String?
+  call        CallLog?  @relation(fields: [callId], references: [id], onDelete: SetNull)
+  question    String
+  status      String    @default("PENDING") // "PENDING", "ANSWERED", "SKIPPED"
+  answer      String?
+  createdAt   DateTime  @default(now())
+}
+
+model EscalationRule {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  topic       String
+  askOwner    Boolean  @default(true)
+  description String?
+}
+
+model Customer {
+  id                  String               @id @default(uuid())
+  businessId          String
+  business            Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name                String
+  phone               String
+  preferences         String?
+  notes               String?
+  createdAt           DateTime             @default(now())
+  appointments        Appointment[]
+  callLogs            CallLog[]
+  bottleneckQuestions BottleneckQuestion[]
+}
+
+model Appointment {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  scheduledAt DateTime
+  service     String
+  status      String   @default("UPCOMING") // "UPCOMING", "COMPLETED", "CANCELLED"
+  createdAt   DateTime @default(now())
+}
+
+model CallLog {
+  id                  String               @id @default(uuid())
+  businessId          String
+  business            Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId          String?
+  customer            Customer?            @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  durationSeconds     Int                  @default(0)
+  outcomeTag          String               @default("ANSWERED") // "BOOKED", "ANSWERED", "ESCALATED"
+  transcript          String
+  summary             String
+  createdAt           DateTime             @default(now())
+  bottleneckQuestions BottleneckQuestion[]
+}
+
+model NotificationSetting {
+  id              String   @id @default(uuid())
+  businessId      String   @unique
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  urgentPush      Boolean  @default(true)
+  digestEmail     Boolean  @default(false)
+  digestFrequency String   @default("DAILY") // "DAILY", "WEEKLY"
+}
+
+model TeamMember {
+  id         String   @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name       String
+  email      String
+  role       String   @default("MEMBER") // "ADMIN", "MEMBER"
+  createdAt  DateTime @default(now())
+}
