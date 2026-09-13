@@ -10,7 +10,7 @@ export const getAccountAndBusiness = async (req: AuthenticatedRequest, res: Resp
 
   const business = await prisma.business.findFirst({
     where: { ownerId: req.userId },
-    include: { teamMembers: true }
+    include: { teamMembers: true, onboardingState: true }
   });
 
   return res.json({ user, business });
@@ -19,9 +19,22 @@ export const getAccountAndBusiness = async (req: AuthenticatedRequest, res: Resp
 export const updateBusinessProfile = async (req: AuthenticatedRequest, res: Response) => {
   const { businessId, name, type, hoursAndServices } = req.body;
 
+  if (!businessId) {
+    return res.status(400).json({ error: 'businessId is required' });
+  }
+
+  const existing = await prisma.business.findFirst({ where: { id: businessId, ownerId: req.userId } });
+  if (!existing) {
+    return res.status(404).json({ error: 'Business not found' });
+  }
+
   const business = await prisma.business.update({
     where: { id: businessId },
-    data: { name, type, hoursAndServices: JSON.stringify(hoursAndServices) }
+    data: {
+      name,
+      type,
+      ...(hoursAndServices !== undefined ? { hoursAndServices: JSON.stringify(hoursAndServices) } : {}),
+    }
   });
 
   return res.json(business);
@@ -29,6 +42,15 @@ export const updateBusinessProfile = async (req: AuthenticatedRequest, res: Resp
 
 export const addTeamMember = async (req: AuthenticatedRequest, res: Response) => {
   const { businessId, name, email, role } = req.body;
+
+  if (!businessId) {
+    return res.status(400).json({ error: 'businessId is required' });
+  }
+
+  const business = await prisma.business.findFirst({ where: { id: businessId, ownerId: req.userId } });
+  if (!business) {
+    return res.status(404).json({ error: 'Business not found' });
+  }
 
   const member = await prisma.teamMember.create({
     data: { businessId, name, email, role: role || 'MEMBER' }

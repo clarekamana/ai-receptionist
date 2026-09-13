@@ -19,6 +19,14 @@ export const answerQuestion = async (req: AuthenticatedRequest, res: Response) =
   const { questionId } = req.params;
   const { answer } = req.body;
 
+  const business = await prisma.business.findFirst({ where: { ownerId: req.userId } });
+  if (!business) return res.status(404).json({ error: 'Business not found' });
+
+  const existing = await prisma.bottleneckQuestion.findFirst({
+    where: { id: questionId, businessId: business.id }
+  });
+  if (!existing) return res.status(404).json({ error: 'Question not found' });
+
   const item = await prisma.bottleneckQuestion.update({
     where: { id: questionId },
     data: { answer, status: 'ANSWERED' }
@@ -39,6 +47,14 @@ export const answerQuestion = async (req: AuthenticatedRequest, res: Response) =
 
 export const skipQuestion = async (req: AuthenticatedRequest, res: Response) => {
   const { questionId } = req.params;
+
+  const business = await prisma.business.findFirst({ where: { ownerId: req.userId } });
+  if (!business) return res.status(404).json({ error: 'Business not found' });
+
+  const existing = await prisma.bottleneckQuestion.findFirst({
+    where: { id: questionId, businessId: business.id }
+  });
+  if (!existing) return res.status(404).json({ error: 'Question not found' });
 
   await prisma.bottleneckQuestion.update({
     where: { id: questionId },

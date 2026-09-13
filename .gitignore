@@ -1,7 +1,6 @@
 # Node.js
 node_modules/
-.env
-.env.*
+!.env.example
 
 # Logs
 logs/
@@ -21,9 +20,13 @@ Thumbs.db
 /.nuxt
 
 # IDE/editor files
-.vscode/
 .idea/
 *.swp
 
 # Misc
 coverage/
+
+# Local databases (contain real local data — never commit)
+prisma/dev.db
+prisma/test.db
+config.bat

@@ -11,9 +11,17 @@ model User {
   id               String      @id @default(uuid())
   email            String      @unique
   passwordHash     String
-  phone            String      @unique
+  phone            String?     @unique
   phoneVerified    Boolean     @default(false)
+  emailVerified    Boolean     @default(false)
   otpCode          String?
+  otpExpiresAt     DateTime?
+  // Which flow the pending otpCode belongs to ("EMAIL_VERIFICATION" |
+  // "PASSWORD_RESET"), so the same OTP storage can't be validated by the
+  // wrong endpoint (e.g. a password-reset code accepted by email
+  // verification, or vice versa). Reuses the existing otpCode/otpExpiresAt
+  // fields rather than adding a second OTP system.
+  otpPurpose       String?
   name             String?
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
@@ -27,7 +35,14 @@ model Business {
   name                 String
   type                 String
   timezone             String                 @default("UTC")
-  allocatedPhone       String?
+  allocatedPhone       String?                @unique
+  // Twilio's PhoneNumberSid for allocatedPhone, set only when a number was
+  // actually purchased through the Twilio API (phoneProvisioningService.ts).
+  // Its presence is what distinguishes a real provisioned number from the
+  // onboarding mock (which sets allocatedPhone but never this field) —
+  // deliberately not a separate boolean flag, to avoid two fields that could
+  // disagree with each other.
+  allocatedPhoneSid    String?                @unique
   forwardingPhone      String?
   phoneConfigured      Boolean                @default(false)
   hoursAndServices     String?                // JSON payload
@@ -43,6 +58,7 @@ model Business {
   callLogs             CallLog[]
   notificationSetting  NotificationSetting?
   teamMembers          TeamMember[]
+  appCalls             AppCall[]
 }
 
 model OnboardingState {
@@ -87,6 +103,8 @@ model EscalationRule {
   topic       String
   askOwner    Boolean  @default(true)
   description String?
+
+  @@unique([businessId, topic])
 }
 
 model Customer {
@@ -127,6 +145,41 @@ model CallLog {
   summary             String
   createdAt           DateTime             @default(now())
   bottleneckQuestions BottleneckQuestion[]
+
+  // Twilio CallSid, stamped on by callLogPersistenceService.ts *after*
+  // processAndSaveCallLog() creates the row (aiCallService.ts itself is not
+  // modified/aware of telephony). Nullable because older/non-telephony rows
+  // never had a call session; unique so outbox retries can detect "this
+  // call already produced a CallLog" before writing a duplicate.
+  callSid             String?              @unique
+
+  // Post-call human escalation (Phase 5.4/5.5), derived from the existing
+  // Groq analysis' outcomeTag — no new AI call, no change to aiCallService.ts.
+  needsEscalation     Boolean              @default(false)
+  escalationReason    String?
+  escalationStatus    String               @default("NONE") // "NONE" | "PENDING" | "HANDLED" | "DISMISSED"
+}
+
+// A durable fallback for when processAndSaveCallLog() fails during a
+// completed call's persistence step. Twilio always gets its 200 response
+// regardless; a failed save lands here instead of being silently lost, and
+// a periodic sweep (callLogPersistenceService.ts) retries it with bounded
+// exponential backoff. Deliberately not a generic job-queue table — this
+// exists only to make one specific operation retryable.
+model CallLogOutbox {
+  id              String   @id @default(uuid())
+  callSid         String   @unique
+  businessId      String
+  customerPhone   String
+  transcript      String
+  durationSeconds Int
+  status          String   @default("PENDING") // "PENDING" | "COMPLETED" | "FAILED"
+  attempts        Int      @default(0)
+  maxAttempts     Int      @default(5)
+  nextAttemptAt   DateTime @default(now())
+  lastError       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model NotificationSetting {
@@ -136,6 +189,32 @@ model NotificationSetting {
   urgentPush      Boolean  @default(true)
   digestEmail     Boolean  @default(false)
   digestFrequency String   @default("DAILY") // "DAILY", "WEEKLY"
+}
+
+// A live, in-app (Mwakire mobile app -> AI receptionist) call, tracked from
+// creation through its lifecycle. Distinct from CallLog, which is a
+// terminal record written only once a call has *finished* — this row is
+// what lets the mobile app query state ("connecting"/"active"/...) and
+// lets the server validate call ownership WHILE the call is still
+// happening. On completion this row's data feeds the existing
+// processAndSaveCallLog()/persistCallLog() pipeline unchanged (via a
+// synthetic callSid), so CallLog/CallLogOutbox are not duplicated.
+model AppCall {
+  id              String    @id @default(uuid())
+  businessId      String
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  // No customer account system exists yet for the Mwakire customer app
+  // (browsing/search/favorites are all anonymous/local-only) — nullable
+  // and unused today, kept so a future customer-auth system has somewhere
+  // to attach without another schema change.
+  customerUserId  String?
+  state           String    @default("CREATED") // CREATED,CONNECTING,CONNECTED,ACTIVE,ENDING,ENDED,FAILED,CANCELLED
+  failureReason   String?
+  startedAt       DateTime  @default(now())
+  connectedAt     DateTime?
+  endedAt         DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
 model TeamMember {
